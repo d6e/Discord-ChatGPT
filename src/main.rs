@@ -6,6 +6,7 @@ use serenity::model::prelude::{GuildId, Ready};
 use serenity::prelude::*;
 use dotenv::dotenv;
 use std::env;
+use tokio::signal::ctrl_c;
 
 struct Handler;
 
@@ -74,7 +75,17 @@ async fn main() {
         .await
         .expect("Error creating the Discord client");
 
-    if let Err(why) = client.start().await {
-        println!("Discord client error: {:?}", why);
+        let shard_manager = client.shard_manager.clone();
+
+       tokio::select! {
+        res = client.start() => {
+            if let Err(why) = res {
+                println!("Client error: {:?}", why);
+            }
+        },
+        _ = ctrl_c() => {
+            println!("Ctrl+C received, shutting down...");
+            shard_manager.lock().await.shutdown_all().await;
+        },
     }
 }
