@@ -36,5 +36,7 @@ WORKDIR /usr/local/bin
 # Copy the binary from the builder image
 COPY --from=builder /usr/src/app/target/release/discord_gpt .
 
+EXPOSE 8080
+
 # Set the entrypoint to run the binary
 CMD ["./discord_gpt"]
