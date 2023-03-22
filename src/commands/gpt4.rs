@@ -96,6 +96,13 @@ async fn get_gpt4_response(prompt: &str) -> Result<String, reqwest::Error> {
         .send()
         .await?;
 
+    let code = res.status();
+    if !code.is_success(){
+        let status_code = code.as_str().to_string();
+        println!("status_code: {status_code}");
+        return Ok(status_code)
+    }
+
     let api_response: ApiResponse = res.json().await?;
 
     if let Some(answer) = api_response.choices.get(0) {
