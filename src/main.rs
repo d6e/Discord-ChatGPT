@@ -1,23 +1,11 @@
+mod commands;
+
 use serenity::async_trait;
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
-use serenity::model::prelude::interaction::application_command::ApplicationCommandInteraction;
+use serenity::model::prelude::{GuildId, Ready};
 use serenity::prelude::*;
-use reqwest;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use serde::{Deserialize, Serialize};
 use dotenv::dotenv;
 use std::env;
-
-// Structure for the ChatGPT-4 API response
-#[derive(Debug, Serialize, Deserialize)]
-struct ApiResponse {
-    choices: Vec<Answer>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Answer {
-    text: String,
-}
 
 struct Handler;
 
@@ -26,7 +14,7 @@ impl EventHandler for Handler {
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         if let Interaction::ApplicationCommand(command) = interaction {
             let content = match command.data.name.as_str() {
-                "chatgpt4" => handle_chatgpt4_command(command.clone(), &ctx).await,
+                "gpt4" => commands::gpt4::run(&command.data.options).await,
                 _ => "Unknown command.".to_string(),
             };
 
@@ -42,63 +30,37 @@ impl EventHandler for Handler {
             }
         }
     }
-}
 
-async fn handle_chatgpt4_command(
-    command: ApplicationCommandInteraction,
-    ctx: &Context,
-) -> String {
-    let user_query = command
-        .data
-        .options
-        .get(0)
-        .and_then(|opt| opt.value.as_ref())
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
+    async fn ready(&self, ctx: Context, ready: Ready) {
+        println!("{} is connected!", ready.user.name);
 
-    match get_gpt4_response(user_query).await {
-        Ok(response) => response,
-        Err(_) => "Error while processing the request. Please try again later.".to_string(),
+        let guild_id = GuildId(
+            env::var("DISCORD_GUILD_ID")
+                .expect("Expected DISCORD_GUILD_ID in environment")
+                .parse()
+                .expect("DISCORD_GUILD_ID must be an integer"),
+        );
+
+        let commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
+            commands
+                .create_application_command(|command| {
+                    commands::gpt4::register(command)
+                })
+        })
+        .await;
+
+        println!("I now have the following guild slash commands: {:#?}", commands);
+
+        // let guild_command = Command::create_global_application_command(&ctx.http, |command| {
+        //     commands::gpt4::register(command)
+        // })
+        // .await;
+
+        // println!("I created the following global slash command: {:#?}", guild_command);
     }
 }
 
-async fn get_gpt4_response(prompt: &str) -> Result<String, reqwest::Error> {
-    let api_key = env::var("OPENAI_KEY").expect("Expected a OPENAI_KEY environment variable");
-    
-    let client = reqwest::Client::new();
-    let url = "https://api.openai.com/v1/engines/davinci-codex/completions";
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        HeaderName::from_static("content-type"),
-        HeaderValue::from_static("application/json"),
-    );
-    headers.insert(
-        HeaderName::from_static("authorization"),
-        HeaderValue::from_str(&format!("Bearer {}", api_key)).unwrap(),
-    );
 
-    let body = serde_json::json!({
-        "prompt": prompt,
-        "max_tokens": 50,
-        "n": 1,
-        "stop": ["\n"],
-    });
-
-    let res = client
-        .post(url)
-        .headers(headers)
-        .json(&body)
-        .send()
-        .await?;
-
-    let api_response: ApiResponse = res.json().await?;
-
-    if let Some(answer) = api_response.choices.get(0) {
-        Ok(answer.text.trim().to_string())
-    } else {
-        Ok("No response from the GPT-4 API.".to_string())
-    }
-}
 
 #[tokio::main]
 async fn main() {
