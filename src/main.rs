@@ -1,10 +1,10 @@
 mod commands;
 
+use dotenv::dotenv;
 use serenity::async_trait;
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
 use serenity::model::prelude::{GuildId, Ready};
 use serenity::prelude::*;
-use dotenv::dotenv;
 use std::env;
 use tokio::signal::ctrl_c;
 
@@ -15,7 +15,31 @@ impl EventHandler for Handler {
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         if let Interaction::ApplicationCommand(command) = interaction {
             let content = match command.data.name.as_str() {
-                "gpt4" => commands::gpt4::run(&command.data.options).await,
+                "gpt4" => {
+
+                    // Clone context and channel_id to be used in the spawned task
+                    let ctx_clone = ctx.clone();
+                    let channel_id = command.channel_id;
+                    let command_clone = command.clone();
+
+                    // Spawn a new task to send the delayed response
+                    tokio::spawn(async move {
+                        // Simulate a delay (e.g., a long-running task)
+                        let cmd_response = commands::gpt4::run(&command_clone.data.options).await;
+                        // Send the delayed response
+                        if let Err(why) = channel_id.say(&ctx_clone.http, cmd_response).await {
+                            println!("Error on replying to discord: {:?}", why)
+                        };
+                    });
+
+                    // Respond with the prompt quickly to avoid timing out with discord
+                    command.data.options
+                        .get(0)
+                        .and_then(|opt| opt.value.as_ref())
+                        .and_then(|value| value.as_str())
+                        .unwrap()
+                        .to_string()
+                }
                 _ => "Unknown command.".to_string(),
             };
 
@@ -43,14 +67,14 @@ impl EventHandler for Handler {
         );
 
         let commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
-            commands
-                .create_application_command(|command| {
-                    commands::gpt4::register(command)
-                })
+            commands.create_application_command(|command| commands::gpt4::register(command))
         })
         .await;
 
-        println!("I now have the following guild slash commands: {:#?}", commands);
+        println!(
+            "I now have the following guild slash commands: {:#?}",
+            commands
+        );
 
         // let guild_command = Command::create_global_application_command(&ctx.http, |command| {
         //     commands::gpt4::register(command)
@@ -61,23 +85,20 @@ impl EventHandler for Handler {
     }
 }
 
-
-
 #[tokio::main]
 async fn main() {
     dotenv().ok();
 
     let token = env::var("DISCORD_TOKEN").expect("Expected a DISCORD_TOKEN environment variable");
 
-
     let mut client = serenity::Client::builder(&token, GatewayIntents::empty())
         .event_handler(Handler)
         .await
         .expect("Error creating the Discord client");
 
-        let shard_manager = client.shard_manager.clone();
+    let shard_manager = client.shard_manager.clone();
 
-       tokio::select! {
+    tokio::select! {
         res = client.start() => {
             if let Err(why) = res {
                 println!("Client error: {:?}", why);
