@@ -1,5 +1,5 @@
 [package]
-name = "discord-gpt-rs"
+name = "discord_gpt"
 version = "0.1.0"
 edition = "2021"
 
