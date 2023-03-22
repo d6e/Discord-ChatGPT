@@ -1,21 +1,40 @@
 use std::env;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use serenity::builder::CreateApplicationCommand;
+use serenity::{builder::CreateApplicationCommand, model::prelude::command::CommandOptionType};
 use serenity::model::prelude::interaction::application_command::CommandDataOption;
 use serde::{Deserialize, Serialize};
 
 // Structure for the ChatGPT-4 API response
 #[derive(Debug, Serialize, Deserialize)]
 struct ApiResponse {
+    id: String,
+    object: String,
+    created: u64,
     choices: Vec<Answer>,
+    usage: Usage
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Usage {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Answer {
-    text: String,
+    index: u32,
+    message: Message,
+    finish_reason: String,
 }
 
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Message {
+    role: String,
+    content: String,
+}
 
 pub async fn run(options: &[CommandDataOption]) -> String {
     let user_query = options
@@ -26,21 +45,30 @@ pub async fn run(options: &[CommandDataOption]) -> String {
 
     match get_gpt4_response(user_query).await {
         Ok(response) => response,
-        Err(_) => "Error while processing the request. Please try again later.".to_string(),
+        Err(e) => format!("Error while processing the request: {e}"),
     }
 }
 
 pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
-    command.name("gpt4").description("Query OpenAI ChatGPT4.")
+    command
+        .name("gpt4")
+        .description("Query OpenAI ChatGPT4.")
+        .create_option(|option|{
+            option
+                .name("prompt")
+                .description("The prompt to pass to gpt")
+                .kind(CommandOptionType::String)
+                .required(true)
+        })
 }
 
 async fn get_gpt4_response(prompt: &str) -> Result<String, reqwest::Error> {
     let api_key = env::var("OPENAI_KEY").expect("Expected a OPENAI_KEY environment variable");
     
-    print!("Querying gpt4 with prompt=\'{}\'", prompt);
+    println!("Querying gpt4 with prompt: {prompt}");
 
     let client = reqwest::Client::new();
-    let url = "https://api.openai.com/v1/engines/davinci-codex/completions";
+    let url = "https://api.openai.com/v1/chat/completions";
     let mut headers = HeaderMap::new();
     headers.insert(
         HeaderName::from_static("content-type"),
@@ -52,10 +80,13 @@ async fn get_gpt4_response(prompt: &str) -> Result<String, reqwest::Error> {
     );
 
     let body = serde_json::json!({
-        "prompt": prompt,
-        "max_tokens": 500,
-        "n": 1,
-        "stop": ["\n"],
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": prompt}],
+        // "temperature": 0.7,
+        // "max_tokens": 5,
+        // "top_p": 1,
+        // "n": 1,
+        // "stop": ["\n"],
     });
 
     let res = client
@@ -68,7 +99,9 @@ async fn get_gpt4_response(prompt: &str) -> Result<String, reqwest::Error> {
     let api_response: ApiResponse = res.json().await?;
 
     if let Some(answer) = api_response.choices.get(0) {
-        Ok(answer.text.trim().to_string())
+        let ans = answer.message.content.trim().to_string();
+        println!("response: {ans}");
+        Ok(ans)
     } else {
         Ok("No response from the GPT-4 API.".to_string())
     }
